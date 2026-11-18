@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -68,11 +69,12 @@ func (c Channel) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
 
 // Config is the whole application configuration.
 type Config struct {
-	// Credentials.
-	APIID    int    `yaml:"api_id"`
-	APIHash  string `yaml:"api_hash"`
-	Phone    string `yaml:"phone"`
-	Password string `yaml:"password"`
+	// Credentials. APIID and APIHash may also be supplied through the
+	// TGDL_API_ID / TGDL_API_HASH environment variables, which win over
+	// the YAML values. The phone number and 2FA password are never stored:
+	// they are asked for interactively by `tgdl -cmd login`.
+	APIID   int    `yaml:"api_id"`
+	APIHash string `yaml:"api_hash"`
 
 	// Runtime paths. Relative paths are resolved against the config file
 	// directory, so the service can be started from anywhere.
@@ -124,18 +126,44 @@ func LoadConfig(path string) (*Config, error) {
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
+	if err := cfg.applyEnv(); err != nil {
+		return nil, err
+	}
 	if err := cfg.finalize(path); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
 }
 
+// Environment variables that override the API credentials from the config
+// file. Keeping them out of config.yaml is useful when the file is readable by
+// other users or checked into a dotfiles repo.
+const (
+	EnvAPIID   = "TGDL_API_ID"
+	EnvAPIHash = "TGDL_API_HASH"
+)
+
+// applyEnv overrides the credentials with non-empty environment variables.
+func (c *Config) applyEnv() error {
+	if v := strings.TrimSpace(os.Getenv(EnvAPIID)); v != "" {
+		id, err := strconv.Atoi(v)
+		if err != nil || id == 0 {
+			return fmt.Errorf("%s: invalid api_id %q (want a positive integer)", EnvAPIID, v)
+		}
+		c.APIID = id
+	}
+	if v := strings.TrimSpace(os.Getenv(EnvAPIHash)); v != "" {
+		c.APIHash = v
+	}
+	return nil
+}
+
 func (c *Config) finalize(path string) error {
 	if c.APIID == 0 {
-		return fmt.Errorf("api_id is required (get it from https://my.telegram.org)")
+		return fmt.Errorf("api_id is required (set %s or api_id in the config; get it from https://my.telegram.org)", EnvAPIID)
 	}
 	if c.APIHash == "" {
-		return fmt.Errorf("api_hash is required (get it from https://my.telegram.org)")
+		return fmt.Errorf("api_hash is required (set %s or api_hash in the config; get it from https://my.telegram.org)", EnvAPIHash)
 	}
 	if len(c.Channels) == 0 {
 		return fmt.Errorf("channels: at least one channel is required")

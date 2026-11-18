@@ -424,11 +424,76 @@ poll_interval: 2m
 }
 
 func TestLoadConfigMissingSecrets(t *testing.T) {
+	clearCredEnv(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.yaml")
 	writeFile(t, path, "channels:\n  - channel: '@foo'\n")
 	if _, err := LoadConfig(path); err == nil {
 		t.Fatal("expected validation error for missing api_id")
+	}
+}
+
+// clearCredEnv isolates the config tests from credentials in the host
+// environment.
+func clearCredEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv(EnvAPIID, "")
+	t.Setenv(EnvAPIHash, "")
+}
+
+func TestLoadConfigEnvCredentials(t *testing.T) {
+	clearCredEnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	writeFile(t, path, "channels:\n  - channel: '@foo'\n")
+
+	t.Setenv(EnvAPIID, "424242")
+	t.Setenv(EnvAPIHash, "deadbeef")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load config from env: %v", err)
+	}
+	if cfg.APIID != 424242 || cfg.APIHash != "deadbeef" {
+		t.Fatalf("env credentials not applied: %+v", cfg)
+	}
+}
+
+func TestLoadConfigEnvOverridesFile(t *testing.T) {
+	clearCredEnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	writeFile(t, path, "api_id: 1\napi_hash: filehash\nchannels:\n  - channel: '@foo'\n")
+
+	t.Setenv(EnvAPIID, "7")
+	t.Setenv(EnvAPIHash, "envhash")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.APIID != 7 || cfg.APIHash != "envhash" {
+		t.Fatalf("env should win over yaml: %+v", cfg)
+	}
+
+	// A partial override keeps the other value from the file.
+	t.Setenv(EnvAPIHash, "")
+	cfg, err = LoadConfig(path)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.APIID != 7 || cfg.APIHash != "filehash" {
+		t.Fatalf("partial override: %+v", cfg)
+	}
+}
+
+func TestLoadConfigInvalidEnvAPIID(t *testing.T) {
+	clearCredEnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	writeFile(t, path, "api_hash: x\nchannels:\n  - channel: '@foo'\n")
+
+	t.Setenv(EnvAPIID, "not-a-number")
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for non-numeric " + EnvAPIID)
 	}
 }
 

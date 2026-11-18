@@ -34,10 +34,21 @@ Static, no cgo, ~20 MB. Cross-compile with `GOOS=linux GOARCH=arm64`.
 sudo useradd --system --home /var/lib/tgdl --shell /usr/sbin/nologin tgdl
 sudo install -d -o tgdl -g tgdl /var/lib/tgdl
 sudo cp config.example.yaml /var/lib/tgdl/config.yaml
-sudo -u tgdl $EDITOR /var/lib/tgdl/config.yaml      # api_id, api_hash, phone, channels
+sudo -u tgdl $EDITOR /var/lib/tgdl/config.yaml      # channels, filters, paths
 
-# one-time interactive login (writes session.json; must run as the same user)
-sudo -u tgdl /usr/local/bin/tgdl -config /var/lib/tgdl/config.yaml -cmd login
+# credentials: set api_id / api_hash in config.yaml, or keep them out of the
+# file and use the environment — TGDL_API_ID / TGDL_API_HASH win over YAML:
+install -m600 /dev/null /etc/tgdl.env     # root-owned, not readable by tgdl
+sudo tee /etc/tgdl.env >/dev/null <<'EOF'
+TGDL_API_ID=123456
+TGDL_API_HASH=0123456789abcdef0123456789abcdef
+EOF
+# ...then uncomment EnvironmentFile=/etc/tgdl.env in tgdl.service.
+
+# one-time interactive login (writes session.json; must run as the same user).
+# sudo -u drops the environment, so pass the credentials through explicitly:
+sudo -u tgdl env TGDL_API_ID=123456 TGDL_API_HASH=... \
+  /usr/local/bin/tgdl -config /var/lib/tgdl/config.yaml -cmd login
 
 sudo install -m755 tgdl /usr/local/bin/tgdl
 sudo install -m644 tgdl.service /etc/systemd/system/tgdl.service
@@ -45,9 +56,10 @@ sudo systemctl enable --now tgdl
 journalctl -u tgdl -f
 ```
 
-Use `-cmd login` from a terminal: it wants the login code (and 2FA password)
-on stdin. The service itself never prompts — if the session is missing it
-exits with an explicit error instead of hanging.
+Use `-cmd login` from a terminal: it asks for the phone number, the login code
+and the 2FA password (if any) on stdin. None of those are config keys — only
+the resulting `session.json` is stored. The service itself never prompts — if
+the session is missing it exits with an explicit error instead of hanging.
 
 ## How it works
 
@@ -231,7 +243,8 @@ internally.
 Three things are worth carrying over.
 
 **1. Credentials.** Go's YAML decoding wants `api_id` as an *unquoted* integer;
-Python configs usually have `api_id: '10688019'`, which fails here.
+Python configs usually have `api_id: '10688019'`, which fails here. Alternatively
+export `TGDL_API_ID` / `TGDL_API_HASH` and leave the keys out of the file.
 
 **2. The channel's `access_hash`.** A numeric `channel: -100...` entry cannot be
 resolved without one. It is stored in the Telethon session:

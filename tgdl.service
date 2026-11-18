@@ -15,6 +15,14 @@ ExecStart=/usr/local/bin/tgdl -config /var/lib/tgdl/config.yaml
 Restart=on-failure
 RestartSec=30s
 
+# Credentials can live in the environment instead of config.yaml. A 0600 root
+# owned file is the safest place:
+#   printf 'TGDL_API_ID=123456\nTGDL_API_HASH=...\n' > /etc/tgdl.env
+#   chmod 600 /etc/tgdl.env
+#EnvironmentFile=/etc/tgdl.env
+#Environment=TGDL_API_ID=123456
+#Environment=TGDL_API_HASH=0123456789abcdef0123456789abcdef
+
 # Graceful shutdown: SIGTERM cancels the context, the in-flight file keeps its
 # .part file and resumes on the next start (verified against server hashes).
 KillSignal=SIGTERM

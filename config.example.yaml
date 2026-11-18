@@ -1,12 +1,14 @@
 # tgdl — Telegram channel video downloader
 #
 # Credentials: https://my.telegram.org → API development tools
+#
+# api_id / api_hash may also be supplied (and overridden) by the environment
+# variables TGDL_API_ID and TGDL_API_HASH, e.g. via systemd Environment= or an
+# EnvironmentFile=. Leave them out of this file if it is world-readable.
 api_id: 123456
 api_hash: 0123456789abcdef0123456789abcdef
-# Used only by `tgdl -cmd login`. Leave empty to be prompted.
-phone: "+8613800000000"
-# Only needed for accounts with two-step verification.
-password: ""
+# The phone number and 2FA password are not config keys: `tgdl -cmd login`
+# always asks for them on the terminal and stores nothing but session.json.
 
 # --- paths (relative paths are resolved against this file) -------------------
 session_file: session.json

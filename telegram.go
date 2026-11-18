@@ -53,7 +53,6 @@ func login(ctx context.Context, client *telegram.Client, cfg *Config) error {
 	}
 
 	p := &prompter{
-		cfg:         cfg,
 		in:          bufio.NewReader(os.Stdin),
 		interactive: true,
 	}
@@ -89,17 +88,15 @@ func displayName(u *tg.User) string {
 	return n
 }
 
-// prompter implements auth.UserAuthenticator on the terminal.
+// prompter implements auth.UserAuthenticator on the terminal. Credentials are
+// never read from the config file (which may be world-readable); everything is
+// asked for interactively during `tgdl -cmd login`.
 type prompter struct {
-	cfg         *Config
 	in          *bufio.Reader
 	interactive bool
 }
 
 func (p *prompter) Phone(context.Context) (string, error) {
-	if p.cfg.Phone != "" {
-		return p.cfg.Phone, nil
-	}
 	if !p.interactive {
 		return "", ErrNotAuthorized
 	}
@@ -108,33 +105,31 @@ func (p *prompter) Phone(context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	p.cfg.Phone = strings.TrimSpace(s)
-	return p.cfg.Phone, nil
+	phone := strings.TrimSpace(s)
+	if phone == "" {
+		return "", errors.New("phone number is required")
+	}
+	return phone, nil
 }
 
 func (p *prompter) Password(context.Context) (string, error) {
-	if p.cfg.Password != "" {
-		return p.cfg.Password, nil
-	}
 	if !p.interactive {
 		return "", auth.ErrPasswordNotProvided
 	}
-	fmt.Print("2FA password: ")
+	fmt.Print("2FA password (leave empty if not set): ")
 	if term.IsTerminal(int(os.Stdin.Fd())) {
 		b, err := term.ReadPassword(int(os.Stdin.Fd()))
 		fmt.Println()
 		if err != nil {
 			return "", err
 		}
-		p.cfg.Password = strings.TrimSpace(string(b))
-		return p.cfg.Password, nil
+		return strings.TrimSpace(string(b)), nil
 	}
 	s, err := p.readLine()
 	if err != nil {
 		return "", err
 	}
-	p.cfg.Password = strings.TrimSpace(s)
-	return p.cfg.Password, nil
+	return strings.TrimSpace(s), nil
 }
 
 func (p *prompter) Code(_ context.Context, sent *tg.AuthSentCode) (string, error) {
