@@ -1,6 +1,6 @@
 module github.com/Urie96/tgdl
 
-go 1.27.3
+go 1.26.0
 
 require (
 	github.com/gotd/td v0.166.1
