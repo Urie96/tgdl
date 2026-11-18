@@ -1,0 +1,47 @@
+[Unit]
+Description=tgdl — Telegram channel video downloader
+Documentation=https://github.com/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Create a dedicated user first:
+#   useradd --system --home /var/lib/tgdl --shell /usr/sbin/nologin tgdl
+User=tgdl
+Group=tgdl
+WorkingDirectory=/var/lib/tgdl
+ExecStart=/usr/local/bin/tgdl -config /var/lib/tgdl/config.yaml
+Restart=on-failure
+RestartSec=30s
+
+# Graceful shutdown: SIGTERM cancels the context, the in-flight file keeps its
+# .part file and resumes on the next start (verified against server hashes).
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+# Journald: one log event per line, no rate-limit dropouts during long downloads.
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=0
+
+# Hardening (adjust the path if your download_dir differs).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tgdl
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+
+# Network is needed for MTProto only.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

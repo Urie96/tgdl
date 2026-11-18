@@ -1,0 +1,12 @@
+# build output
+/tgdl
+
+# runtime state — contains the session auth key
+session.json
+state.db
+state.db-wal
+state.db-shm
+downloads/
+
+# local config with real credentials
+config.yaml

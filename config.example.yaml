@@ -1,0 +1,63 @@
+# tgdl — Telegram channel video downloader
+#
+# Credentials: https://my.telegram.org → API development tools
+api_id: 123456
+api_hash: 0123456789abcdef0123456789abcdef
+# Used only by `tgdl -cmd login`. Leave empty to be prompted.
+phone: "+8613800000000"
+# Only needed for accounts with two-step verification.
+password: ""
+
+# --- paths (relative paths are resolved against this file) -------------------
+session_file: session.json
+state_file: state.db
+download_dir: /var/lib/tgdl/downloads
+
+# --- runtime -----------------------------------------------------------------
+# How often each channel is checked for new videos.
+poll_interval: 10m
+# Parallel chunk connections used for a single file. 4 is a good default;
+# higher values are faster but more likely to hit FLOOD_WAIT.
+threads: 4
+# Attempts per message before it is skipped. Skipped messages stay in the
+# state database and are not retried again.
+retries: 5
+log_level: info
+# A recorded message is never downloaded twice, even if the file was moved or
+# deleted afterwards (state.db is authoritative). Set this to true to also
+# require the file to still exist at its recorded path with the right size.
+redownload_missing_files: false
+# true  = download the channel's existing archive on first run
+# false = only download videos posted from now on
+backfill: true
+
+# --- filters (global; override per channel) ----------------------------------
+filters:
+  # Skip videos larger than this many bytes. 0 = no limit.
+  max_file_size: 0
+  # Skip videos shorter/longer than this many seconds. 0 = no limit.
+  min_duration: 0
+  max_duration: 0
+
+# --- channels ----------------------------------------------------------------
+# Sources can be:
+#   "@username" / "t.me/username"  -> channel or supergroup (has a username)
+#   "-100<channel id>"             -> channel or supergroup (needs access_hash,
+#                                     cached in state.db after the first resolve)
+#   "-<group id>"                  -> basic group (InputPeerChat, no access_hash)
+# The account must be a member; a basic group that was upgraded to a supergroup
+# is followed automatically via chat.migrated_to.
+channels:
+  - channel: "@telegram"
+    # Optional top-level folder name. Defaults to the username or channel title.
+    # dir: telegram
+    # enabled: false
+    # Per-channel overrides:
+    # backfill: false
+    # max_file_size: 2000000000
+    # min_duration: 60
+
+  # A basic group.
+  # - channel: "-5075548374"
+  #   dir: my-group
+  #   backfill: false
