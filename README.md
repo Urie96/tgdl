@@ -124,6 +124,13 @@ writes parts with `WriteAt` from several goroutines, so a partial file's *size*
 does not prove its prefix is complete — a naive `size`-based resume can produce
 a video with a hole in the middle.
 
+Hashes are requested from the DC that stores the file, not from the session's
+home DC. Telegram serves `upload.getFileHashes` only on the file's own DC and
+answers `LOCATION_INVALID` everywhere else (unlike `upload.getFile`, it has no
+`FILE_MIGRATE` hint), so a video uploaded to another DC used to fail hash
+verification — and with it the whole download — with a 400. The download runs on
+`Client.FileDC(doc.dc_id)`; the refresh callback stays on the primary client.
+
 ### Video detection
 
 A message is downloaded when its media document carries a

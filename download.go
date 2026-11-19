@@ -21,15 +21,49 @@ import (
 // each call is what made the Python version burn CPU and flood the journal.
 const progressEvery = 5 * time.Second
 
+// fileDCProvider hands out invokers bound to one datacenter.
+//
+// *telegram.Client implements it. It is needed because Telegram answers
+// upload.getFileHashes only on the DC that stores the file: any other DC
+// replies LOCATION_INVALID (upload.getFile, by contrast, replies FILE_MIGRATE,
+// which gotd follows automatically). A video uploaded to a different DC than the
+// account's home DC therefore failed hash verification — and with it the whole
+// download — even though the file itself was reachable.
+type fileDCProvider interface {
+	FileDC(ctx context.Context, dc int) (tg.Invoker, error)
+}
+
 // dl downloads videos for one channel.
 type dl struct {
-	api     *tg.Client
+	api *tg.Client
+	// client is used to reach the DC that stores a document. May be nil, in
+	// which case every request goes through api.
+	client fileDCProvider
+	// homeDC is the session's datacenter. Documents on other DCs need a
+	// dedicated connection (see fileAPI).
+	homeDC  int
 	dl      *downloader.Downloader
 	store   *Store
 	cfg     *Config
 	filters Filters
 	log     *slog.Logger
 	ref     channelRef
+}
+
+// fileAPI returns the client to use for one document's upload.* requests: one
+// bound to the DC that stores the file, or the home-DC client when the DC is
+// unknown, matches the session's DC, or cannot be reached.
+func (d *dl) fileAPI(ctx context.Context, dc int) *tg.Client {
+	if dc <= 0 || dc == d.homeDC || d.client == nil {
+		return d.api
+	}
+	inv, err := d.client.FileDC(ctx, dc)
+	if err != nil {
+		d.log.Warn("cannot reach file DC, falling back to home DC", "dc", dc, "err", err)
+		return d.api
+	}
+	d.log.Debug("using file DC", "dc", dc)
+	return tg.NewClient(inv)
 }
 
 // targetPath builds the final destination path for a video.
@@ -109,7 +143,9 @@ func (d *dl) run(ctx context.Context, v video) error {
 		FileReference: v.Doc.FileReference,
 	}
 
-	b := d.dl.Download(d.api, loc).
+	// download and verify on the DC that stores the file; refresh (re-reading
+	// the message for a fresh file_reference) stays on the primary client.
+	b := d.dl.Download(d.fileAPI(ctx, v.Doc.DCID), loc).
 		WithThreads(d.cfg.Threads).
 		WithSize(v.Size()).
 		WithVerify(true).

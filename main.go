@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gotd/td/session"
+	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/downloader"
 	"github.com/gotd/td/tg"
 )
@@ -62,7 +64,7 @@ func run() error {
 			if err := ensureAuthorized(ctx, client); err != nil {
 				return err
 			}
-			return serve(ctx, client.API(), store, cfg, *once)
+			return serve(ctx, client, store, cfg, *once)
 		})
 		if ctx.Err() != nil {
 			// Interrupted via SIGTERM/SIGINT: that is a normal outcome.
@@ -110,8 +112,9 @@ func printStats(store *Store) error {
 }
 
 // serve resolves all channels and then polls them until ctx is cancelled.
-func serve(ctx context.Context, api *tg.Client, store *Store, cfg *Config, once bool) error {
+func serve(ctx context.Context, client *telegram.Client, store *Store, cfg *Config, once bool) error {
 	log := slog.Default()
+	api := client.API()
 
 	resolved := make([]channelRef, 0, len(cfg.Channels))
 	for _, spec := range cfg.Channels {
@@ -133,7 +136,7 @@ func serve(ctx context.Context, api *tg.Client, store *Store, cfg *Config, once 
 
 	sync := func() {
 		for _, ref := range resolved {
-			if err := syncChannel(ctx, api, store, cfg, ref); err != nil {
+			if err := syncChannel(ctx, client, store, cfg, ref); err != nil {
 				if ctx.Err() != nil {
 					return
 				}
@@ -165,9 +168,22 @@ func serve(ctx context.Context, api *tg.Client, store *Store, cfg *Config, once 
 	}
 }
 
+// sessionDC returns the datacenter stored in the session file, i.e. the DC the
+// client is connected to. Zero means "unknown".
+//
+// Videos stored on another DC need their own connection, see dl.fileAPI.
+func sessionDC(ctx context.Context, cfg *Config) int {
+	data, err := (&session.Loader{Storage: &session.FileStorage{Path: cfg.SessionFile}}).Load(ctx)
+	if err != nil || data == nil {
+		return 0
+	}
+	return data.DC
+}
+
 // syncChannel runs the historical sweep (once) and the incremental catch-up.
-func syncChannel(ctx context.Context, api *tg.Client, store *Store, cfg *Config, ref channelRef) error {
+func syncChannel(ctx context.Context, client *telegram.Client, store *Store, cfg *Config, ref channelRef) error {
 	log := slog.Default()
+	api := client.API()
 	state, err := store.Channel(ref.ID)
 	if err != nil {
 		return err
@@ -178,6 +194,8 @@ func syncChannel(ctx context.Context, api *tg.Client, store *Store, cfg *Config,
 
 	d := &dl{
 		api:     api,
+		client:  client,
+		homeDC:  sessionDC(ctx, cfg),
 		dl:      downloader.NewDownloader(),
 		store:   store,
 		cfg:     cfg,
