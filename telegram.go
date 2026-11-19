@@ -9,7 +9,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/gotd/td/bin"
 	"github.com/gotd/td/session"
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
@@ -34,8 +36,26 @@ func newClient(cfg *Config) *telegram.Client {
 		Device:         telegram.DeviceTDesktopWindows(),
 		Resolver:       telegram.TDesktopResolver(),
 		DCList:         dcs.Prod(),
+
+		// Without a dial timeout a blackholed endpoint stalls the connect
+		// attempt for the kernel's SYN timeout (minutes).
+		DialTimeout: dialTimeout,
+		// gotd has no response deadline by default: if the reply never arrives
+		// the caller waits forever, so a single stuck request silently froze the
+		// whole poll loop and the hourly ticker stopped firing.
+		// All requests here are idempotent reads/downloads, so gotd's "reconnect
+		// and resend once" behavior on a missed deadline is safe.
+		RequestTimeout: func(bin.Encoder) time.Duration { return requestTimeout },
 	})
 }
+
+const (
+	// dialTimeout bounds one connection attempt.
+	dialTimeout = 15 * time.Second
+	// requestTimeout bounds how long one RPC may stay unanswered before gotd
+	// reconnects and resends it.
+	requestTimeout = 60 * time.Second
+)
 
 // login runs an interactive authorization flow and stores the session.
 func login(ctx context.Context, client *telegram.Client, cfg *Config) error {

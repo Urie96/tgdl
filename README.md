@@ -226,9 +226,19 @@ internally.
   log, so one broken video cannot block a channel forever.
 * `FLOOD_WAIT` is handled by gotd internally (it sleeps and retries); the retry
   handler only logs it.
-* Fatal channel errors (`CHANNEL_INVALID`, `CHANNEL_PRIVATE`, `SESSION_REVOKED`,
-  …) abort the pass immediately and are logged; the next tick retries, which
-  covers transient cases like a reconnect.
+* Fatal channel errors (`CHANNEL_INVALID`, `CHANNEL_PRIVATE`, …) abort the pass
+  immediately and are logged; the next tick retries, which covers transient
+  cases like a reconnect.
+* Any 401 (`AUTH_KEY_UNREGISTERED`, `SESSION_REVOKED`, …) is fatal for the
+  process: retrying cannot help, so it exits with `78` (EX_CONFIG) and a message
+  telling the operator to run `-cmd login` again. Set
+  `RestartPreventExitStatus=78` in the unit (as `tgdl.service` does) so systemd
+  keeps the unit failed and monitoring notices, instead of restarting it every
+  30s forever.
+* Connection attempts use `DialTimeout: 15s`, and every RPC has a 60s response
+  deadline (`telegram.Options.RequestTimeout`). gotd waits forever by default,
+  and one unanswered request used to freeze the poll loop — which also stopped
+  the ticker from firing, so the service sat silent for hours.
 
 ## Notes and limitations
 

@@ -14,6 +14,9 @@ WorkingDirectory=/var/lib/tgdl
 ExecStart=/usr/local/bin/tgdl -config /var/lib/tgdl/config.yaml
 Restart=on-failure
 RestartSec=30s
+# 78 = EX_CONFIG: the session is gone and only a human can fix it (`-cmd login`).
+# Without this the unit would restart every 30s forever, hiding the problem.
+RestartPreventExitStatus=78
 
 # Credentials can live in the environment instead of config.yaml. A 0600 root
 # owned file is the safest place:

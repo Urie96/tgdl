@@ -337,11 +337,40 @@ func (d *dl) onRetry(v video) downloader.RetryHandler {
 	}
 }
 
+// isAuthError reports errors that mean the session itself is unusable: the pass
+// cannot succeed on the next poll tick either, somebody has to log in again.
+//
+// Telegram answers 401 for every flavour of "this auth key is not valid", so the
+// code is checked as well as the exact types.
+func isAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrNotAuthorized) {
+		return true
+	}
+	if tgerr.IsCode(err, 401) {
+		return true
+	}
+	return tgerr.Is(err,
+		"AUTH_KEY_UNREGISTERED",
+		"AUTH_KEY_INVALID",
+		"AUTH_KEY_DUPLICATED",
+		"SESSION_REVOKED",
+		"SESSION_EXPIRED",
+		"USER_DEACTIVATED",
+		"USER_DEACTIVATED_BAN",
+	)
+}
+
 // isFatalChannelError reports errors that mean the whole channel is unusable
 // (bad access hash, kicked, no access), so the pass should stop immediately.
 func isFatalChannelError(err error) bool {
 	if err == nil {
 		return false
+	}
+	if isAuthError(err) {
+		return true
 	}
 	for _, typ := range []string{
 		"CHANNEL_INVALID",
@@ -349,15 +378,12 @@ func isFatalChannelError(err error) bool {
 		"CHANNEL_PUBLIC_GROUP_NA",
 		"CHAT_FORBIDDEN",
 		"USER_BANNED_IN_CHANNEL",
-		"AUTH_KEY_UNREGISTERED",
-		"SESSION_REVOKED",
-		"SESSION_EXPIRED",
 	} {
 		if tgerr.Is(err, typ) {
 			return true
 		}
 	}
-	return errors.Is(err, ErrNotAuthorized)
+	return false
 }
 
 func humanBytes(n int64) string {

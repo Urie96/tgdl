@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgerr"
 )
 
 func TestParseChannelSpec(t *testing.T) {
@@ -810,5 +812,48 @@ func TestBackfillToggleIsReversible(t *testing.T) {
 	}
 	if got.BackfillOffset != 0 {
 		t.Fatalf("backfill offset must stay untouched, got %d", got.BackfillOffset)
+	}
+}
+
+func TestIsAuthError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"not authorized sentinel", ErrNotAuthorized, true},
+		{"wrapped not authorized", fmt.Errorf("ensure: %w", ErrNotAuthorized), true},
+		{
+			"auth key unregistered",
+			fmt.Errorf("fetch new messages: %w", tgerr.New(401, "AUTH_KEY_UNREGISTERED")),
+			true,
+		},
+		{"session revoked", tgerr.New(401, "SESSION_REVOKED"), true},
+		{"any other 401", tgerr.New(401, "SOMETHING_NEW"), true},
+		// Transient failures must keep being retried per tick.
+		{"location invalid", tgerr.New(400, "LOCATION_INVALID"), false},
+		{"flood wait", tgerr.New(420, "FLOOD_WAIT_30"), false},
+		{"channel invalid", tgerr.New(400, "CHANNEL_INVALID"), false},
+		{"plain error", errors.New("network is unreachable"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isAuthError(tt.err); got != tt.want {
+				t.Fatalf("isAuthError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestChannelErrorsAreNotAuthErrors(t *testing.T) {
+	// A channel-level problem must not kill the service: only the session being
+	// gone does, because only that needs a human to log in again.
+	err := tgerr.New(400, "CHANNEL_PRIVATE")
+	if !isFatalChannelError(err) {
+		t.Fatal("CHANNEL_PRIVATE should stop the pass")
+	}
+	if isAuthError(err) {
+		t.Fatal("CHANNEL_PRIVATE should not be treated as an auth failure")
 	}
 }

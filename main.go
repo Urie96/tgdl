@@ -17,14 +17,27 @@ import (
 	"github.com/gotd/td/tg"
 )
 
+// exitNeedsLogin is EX_CONFIG from sysexits.h: the saved session is gone and no
+// retry can fix that. The systemd unit sets RestartPreventExitStatus for this
+// code, so the unit stays failed and monitoring notices, instead of the service
+// restarting every 30s forever.
+const exitNeedsLogin = 78
+
+// ErrNeedsLogin means the saved session is no longer usable: the service exits
+// with exitNeedsLogin and somebody has to log in again interactively.
+var ErrNeedsLogin = errors.New(
+	"session is no longer authorized, run `tgdl -cmd login` once, then start the service")
+
 func main() {
-	if err := run(); err != nil {
-		if errors.Is(err, context.Canceled) {
-			return
-		}
-		fmt.Fprintf(os.Stderr, "\ntgdl: %v\n", err)
-		os.Exit(1)
+	err := run()
+	if err == nil || errors.Is(err, context.Canceled) {
+		return
 	}
+	fmt.Fprintf(os.Stderr, "\ntgdl: %v\n", err)
+	if errors.Is(err, ErrNeedsLogin) {
+		os.Exit(exitNeedsLogin)
+	}
+	os.Exit(1)
 }
 
 func run() error {
@@ -69,6 +82,15 @@ func run() error {
 		if ctx.Err() != nil {
 			// Interrupted via SIGTERM/SIGINT: that is a normal outcome.
 			return nil
+		}
+		if isAuthError(err) {
+			// Polling again cannot help: the auth key was revoked, so somebody
+			// has to log in again. Fail loudly instead of logging the same 401
+			// every hour.
+			if errors.Is(err, ErrNotAuthorized) {
+				return ErrNeedsLogin
+			}
+			return fmt.Errorf("%w (%v)", ErrNeedsLogin, err)
 		}
 		return err
 	default:
@@ -124,6 +146,10 @@ func serve(ctx context.Context, client *telegram.Client, store *Store, cfg *Conf
 		}
 		ref, err := resolveChannel(ctx, api, store, spec)
 		if err != nil {
+			if isAuthError(err) {
+				// Every other channel will fail the same way.
+				return fmt.Errorf("cannot resolve channel %s: %w", spec.Channel, err)
+			}
 			log.Error("cannot resolve channel", "channel", spec.Channel, "err", err)
 			continue
 		}
@@ -134,11 +160,17 @@ func serve(ctx context.Context, client *telegram.Client, store *Store, cfg *Conf
 		return errors.New("no usable channels configured")
 	}
 
-	sync := func() {
+	// sync runs one pass over all channels. A dead session is returned to the
+	// caller: the next tick would fail exactly the same way, and the service has
+	// to exit so the operator re-logs in. Other failures stay per-tick retries.
+	sync := func() error {
 		for _, ref := range resolved {
 			if err := syncChannel(ctx, client, store, cfg, ref); err != nil {
 				if ctx.Err() != nil {
-					return
+					return nil
+				}
+				if isAuthError(err) {
+					return fmt.Errorf("channel %s: %w", ref.String(), err)
 				}
 				log.Error("sync failed", "channel", ref.String(), "err", err)
 			}
@@ -146,9 +178,12 @@ func serve(ctx context.Context, client *telegram.Client, store *Store, cfg *Conf
 		if st, err := store.Stats(); err == nil {
 			log.Info("state", "videos", st.Videos, "size", humanBytes(st.Bytes))
 		}
+		return nil
 	}
 
-	sync()
+	if err := sync(); err != nil {
+		return err
+	}
 	if once {
 		log.Info("single pass finished")
 		return nil
@@ -163,7 +198,9 @@ func serve(ctx context.Context, client *telegram.Client, store *Store, cfg *Conf
 			log.Info("shutting down")
 			return nil
 		case <-ticker.C:
-			sync()
+			if err := sync(); err != nil {
+				return err
+			}
 		}
 	}
 }
